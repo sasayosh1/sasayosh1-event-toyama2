@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import base64
 import hashlib
+import json
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
@@ -31,25 +32,49 @@ def _auth():
 
     CI 環境ではブラウザが使えないため、事前に取得した token.json を利用する。
     ローカル実行で token.json が無ければブラウザフローを走らせて生成する。"""
+    print("Starting authentication...")
+    
     # token.json の内容を環境変数から取得
     token_b64 = os.getenv("GOOGLE_TOKEN_B64")
+    print(f"GOOGLE_TOKEN_B64 found: {bool(token_b64)}")
+    
     if token_b64:
-        token_json = base64.b64decode(token_b64).decode("utf-8")
-        creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
-        return build("calendar", "v3", credentials=creds)
+        try:
+            print("Attempting to decode token...")
+            token_json = base64.b64decode(token_b64).decode("utf-8")
+            print("Token decoded successfully")
+            creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+            print("Credentials created successfully")
+            return build("calendar", "v3", credentials=creds)
+        except Exception as e:
+            print(f"Error processing token: {e}")
+            # Continue to try credentials approach
 
     # credentials.json の内容を環境変数から取得
     creds_b64 = os.getenv("GOOGLE_CREDENTIALS_B64")
+    print(f"GOOGLE_CREDENTIALS_B64 found: {bool(creds_b64)}")
+    
     if not creds_b64:
         raise SystemExit("GOOGLE_TOKEN_B64 or GOOGLE_CREDENTIALS_B64 not found in environment variables.")
 
-    creds_json = base64.b64decode(creds_b64).decode("utf-8")
-    flow = InstalledAppFlow.from_client_secrets_info(json.loads(creds_json), SCOPES)
-    creds = flow.run_local_server(port=0)
-    
-    # Save for reuse (optional, for local development)
-    # token_path.write_text(creds.to_json())
-    return build("calendar", "v3", credentials=creds)
+    try:
+        print("Attempting to decode credentials...")
+        creds_json = base64.b64decode(creds_b64).decode("utf-8")
+        print("Credentials decoded successfully")
+        
+        # Check if running in CI environment
+        if os.getenv("CI") or os.getenv("GITHUB_ACTIONS"):
+            print("Running in CI environment - cannot use interactive OAuth flow")
+            raise SystemExit("CI environment detected but no valid token provided. Please ensure GOOGLE_TOKEN_B64 is set with a valid token.")
+        
+        flow = InstalledAppFlow.from_client_secrets_info(json.loads(creds_json), SCOPES)
+        print("OAuth flow created, running local server...")
+        creds = flow.run_local_server(port=0)
+        print("Authentication completed successfully")
+        return build("calendar", "v3", credentials=creds)
+    except Exception as e:
+        print(f"Error processing credentials: {e}")
+        raise SystemExit(f"Authentication failed: {e}")
 
 
 def _ensure_db(conn: sqlite3.Connection):
