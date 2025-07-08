@@ -23,4 +23,7 @@ jobs:
           GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
         run: echo "$GOOGLE_TOKEN_B64" | base64 -d > token.json
       - name: Run sync
+        env:
+          GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
+          GOOGLE_CREDENTIALS_B64: ${{ secrets.GOOGLE_CREDENTIALS_B64 }}
         run: python gcal_sync.py
