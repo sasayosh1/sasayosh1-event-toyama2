@@ -1,0 +1,26 @@
+name: Sync Toyama Events
+
+on:
+  schedule:
+    # 毎日 07:00 JST（22:00 UTC）に実行
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt --verbose
+      - name: Write token.json
+        env:
+          GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
+        run: echo "$GOOGLE_TOKEN_B64" | base64 -d > token.json
+      - name: Run sync
+        run: python gcal_sync.py
