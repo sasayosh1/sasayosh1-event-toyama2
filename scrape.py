@@ -22,6 +22,7 @@ import re
 import hashlib
 from datetime import datetime, date, timedelta
 from typing import Generator, Iterable, Optional
+from difflib import SequenceMatcher
 
 import requests
 from bs4 import BeautifulSoup
@@ -33,10 +34,136 @@ HEADERS = {
 }
 
 # ---------------------------------------------------------------------------
-# Helper functions
+# Helper functions  
 # ---------------------------------------------------------------------------
 
 _DEF_YEAR = datetime.now().year
+
+
+def normalize_title(title: str) -> str:
+    """Normalize event title for duplicate detection."""
+    # Convert to lowercase and remove common variations
+    normalized = title.lower()
+    
+    # Remove common prefixes/suffixes
+    prefixes_suffixes = [
+        r'^第\d+回\s*', r'\s*第\d+回$',  # 第XX回
+        r'^令和\d+年\s*', r'\s*令和\d+年$',  # 令和X年
+        r'^平成\d+年\s*', r'\s*平成\d+年$',  # 平成X年
+        r'^20\d{2}年?\s*', r'\s*20\d{2}年?$',  # 20XX年
+        r'\s*～.*$', r'\s*-.*$',  # Remove everything after ～ or -
+        r'\s*\(.*\)$', r'^\(.*\)\s*',  # Remove parentheses
+        r'\s*【.*】$', r'^【.*】\s*',  # Remove 【】
+        r'\s*［.*］$', r'^［.*］\s*',  # Remove ［］
+        r'\s*〈.*〉$', r'^〈.*〉\s*',  # Remove 〈〉
+    ]
+    
+    for pattern in prefixes_suffixes:
+        normalized = re.sub(pattern, '', normalized)
+    
+    # Remove extra whitespace and punctuation
+    normalized = re.sub(r'[　\s]+', ' ', normalized)  # Normalize whitespace
+    normalized = re.sub(r'[・·•]', '', normalized)  # Remove separators
+    normalized = re.sub(r'[！!？?。、，,]', '', normalized)  # Remove punctuation
+    
+    # Remove location/venue information if it looks generic
+    location_patterns = [
+        r'\s*富山県?\s*', r'\s*高岡市?\s*', r'\s*魚津市?\s*',
+        r'\s*会場.*$', r'\s*にて.*$', r'\s*で開催.*$'
+    ]
+    for pattern in location_patterns:
+        normalized = re.sub(pattern, '', normalized)
+    
+    return normalized.strip()
+
+
+def events_similar(event1: dict, event2: dict) -> bool:
+    """Check if two events are likely duplicates."""
+    # Normalize titles
+    title1 = normalize_title(event1['title'])
+    title2 = normalize_title(event2['title'])
+    
+    # Skip if either title is empty after normalization
+    if not title1 or not title2:
+        return False
+    
+    # Calculate title similarity
+    similarity = SequenceMatcher(None, title1, title2).ratio()
+    
+    # Check date proximity (same date or within 1 day)
+    date_diff = abs((event1['start'] - event2['start']).days)
+    date_similar = date_diff <= 1
+    
+    # Check if one title contains the other (subset matching)
+    longer_title = title1 if len(title1) >= len(title2) else title2
+    shorter_title = title2 if title1 == longer_title else title1
+    contains_other = shorter_title in longer_title
+    
+    # Consider them duplicates if:
+    # 1. Exact match after normalization
+    # 2. High title similarity (>0.8) and same/close dates
+    # 3. Very high title similarity (>0.85) regardless of date
+    # 4. One title contains the other and dates are similar
+    if title1 == title2:
+        return True
+    elif contains_other and date_similar and len(shorter_title) >= 3:
+        return True
+    elif similarity > 0.85:
+        return True  
+    elif similarity > 0.7 and date_similar:
+        return True
+    
+    return False
+
+
+def merge_events(event1: dict, event2: dict) -> dict:
+    """Merge two similar events, keeping the best information."""
+    # Prefer the event with more complete information
+    def event_completeness_score(ev):
+        score = 0
+        if ev.get('location') and ev['location'].strip():
+            score += 2
+        if ev.get('url') and ev['url'].startswith('http'):
+            score += 1
+        if ev.get('end') is not None:
+            score += 1
+        score += len(ev.get('title', '')) / 100  # Longer titles often more descriptive
+        return score
+    
+    score1 = event_completeness_score(event1)
+    score2 = event_completeness_score(event2)
+    
+    # Use the event with higher completeness score as base
+    if score1 >= score2:
+        base, other = event1, event2
+    else:
+        base, other = event2, event1
+    
+    # Merge information
+    merged = base.copy()
+    
+    # Use better location if available
+    if not merged.get('location') and other.get('location'):
+        merged['location'] = other['location']
+    
+    # Use earlier start date
+    if other['start'] < merged['start']:
+        merged['start'] = other['start']
+    
+    # Use later end date if both have end dates
+    if merged.get('end') and other.get('end'):
+        if other['end'] > merged['end']:
+            merged['end'] = other['end']
+    elif not merged.get('end') and other.get('end'):
+        merged['end'] = other['end']
+    
+    # Combine site information
+    if 'sites' not in merged:
+        merged['sites'] = [merged['site']]
+    if other['site'] not in merged['sites']:
+        merged['sites'].append(other['site'])
+    
+    return merged
 
 
 def _parse_single_date(text: str, debug: bool = False) -> date:
@@ -377,21 +504,39 @@ def fetch_toyamadays() -> Iterable[dict]:
 # ---------------------------------------------------------------------------
 
 def all_events() -> Generator[dict, None, None]:
-    """Yield de-duplicated events aggregated from all scrapers."""
-
-    seen: set[str] = set()
-
-    def _ev_key(ev: dict) -> str:
-        raw = f"{ev['title']}{ev['start']}"
-        return hashlib.sha256(raw.encode()).hexdigest()
-
+    """Yield intelligently de-duplicated events aggregated from all scrapers."""
+    
+    events_list = []
+    
+    # Collect all events first
     for fetcher in (fetch_info_toyama, fetch_toyamalife, fetch_toyamadays):
         for ev in fetcher():
-            key = _ev_key(ev)
-            if key in seen:
-                continue
-            seen.add(key)
-            yield ev
+            events_list.append(ev)
+    
+    # Advanced deduplication
+    deduplicated = []
+    
+    for current_event in events_list:
+        # Check if current event is similar to any existing deduplicated event
+        merged_with_existing = False
+        
+        for i, existing_event in enumerate(deduplicated):
+            if events_similar(current_event, existing_event):
+                # Merge the events and replace the existing one
+                merged_event = merge_events(existing_event, current_event)
+                deduplicated[i] = merged_event
+                merged_with_existing = True
+                break
+        
+        # If not merged with existing, add as new event
+        if not merged_with_existing:
+            deduplicated.append(current_event)
+    
+    # Sort by start date
+    deduplicated.sort(key=lambda ev: ev['start'])
+    
+    for ev in deduplicated:
+        yield ev
 
 
 if __name__ == "__main__":
@@ -424,15 +569,46 @@ if __name__ == "__main__":
                 print(f"ERROR: {test_date} -> {e}")
                 print()
         sys.exit(0)
+    
+    # Test deduplication if --test-dedup flag is provided
+    if "--test-dedup" in sys.argv:
+        print("=== TESTING DEDUPLICATION ===")
+        
+        # Test examples
+        test_events = [
+            {"title": "第71回北日本新聞納涼花火高岡会場", "start": date(2025, 8, 4), "end": None, "location": "", "url": "http://test1.com", "site": "site1"},
+            {"title": "北日本新聞納涼花火大会　高岡会場", "start": date(2025, 8, 4), "end": None, "location": "高岡市", "url": "http://test2.com", "site": "site2"},
+            {"title": "越中八尾 おわら風の盆", "start": date(2025, 9, 1), "end": date(2025, 9, 3), "location": "", "url": "http://test3.com", "site": "site1"},
+            {"title": "おわら風の盆", "start": date(2025, 9, 1), "end": None, "location": "八尾町", "url": "http://test4.com", "site": "site2"},
+        ]
+        
+        for i, ev1 in enumerate(test_events):
+            for j, ev2 in enumerate(test_events[i+1:], i+1):
+                similar = events_similar(ev1, ev2)
+                print(f"Event {i+1} vs Event {j+1}:")
+                print(f"  '{ev1['title']}' vs '{ev2['title']}'")
+                print(f"  Normalized: '{normalize_title(ev1['title'])}' vs '{normalize_title(ev2['title'])}'")
+                print(f"  Similar: {similar}")
+                if similar:
+                    merged = merge_events(ev1, ev2)
+                    print(f"  Merged: {merged}")
+                print()
+        
+        sys.exit(0)
 
     events = list(all_events())
     
     if debug_mode:
-        print(f"\n=== FOUND {len(events)} EVENTS ===")
+        print(f"\n=== FOUND {len(events)} EVENTS AFTER DEDUPLICATION ===")
         for i, event in enumerate(events, 1):
             print(f"{i}. {event['title']}")
             print(f"   Date: {event['start']} - {event['end']}")
-            print(f"   Site: {event['site']}")
+            if event.get('location'):
+                print(f"   Location: {event['location']}")
+            if event.get('sites'):
+                print(f"   Sources: {', '.join(event['sites'])}")
+            else:
+                print(f"   Site: {event['site']}")
             print(f"   URL: {event['url']}")
             print()
     
