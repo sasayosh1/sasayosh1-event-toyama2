@@ -99,10 +99,37 @@ def _event_body(ev: dict) -> dict:
     # ev["start"] は date オブジェクトを想定
     start_date = ev["start"]
     end_date = ev.get("end")
+    
+    print(f"Processing event: {ev.get('title', 'Unknown')}")
+    print(f"Start date: {start_date} (type: {type(start_date)})")
+    print(f"End date: {end_date} (type: {type(end_date)})")
 
+    # Ensure we have proper date objects
+    if isinstance(start_date, str):
+        try:
+            from dateutil.parser import parse
+            start_date = parse(start_date).date()
+        except:
+            print(f"Failed to parse start date: {start_date}")
+            return None
+    
     if end_date is None or end_date == start_date:
         # 終日イベントの場合、終了日は開始日の翌日
         end_date = start_date + timedelta(days=1)
+    elif isinstance(end_date, str):
+        try:
+            from dateutil.parser import parse
+            end_date = parse(end_date).date()
+        except:
+            print(f"Failed to parse end date: {end_date}")
+            end_date = start_date + timedelta(days=1)
+    
+    # Validate dates
+    if end_date <= start_date:
+        print(f"Invalid date range: start={start_date}, end={end_date}. Fixing...")
+        end_date = start_date + timedelta(days=1)
+    
+    print(f"Final dates - Start: {start_date}, End: {end_date}")
     
     body = {
         "summary": ev["title"],
@@ -127,19 +154,29 @@ def main():
     inserted = updated = 0
 
     for ev in scrape.all_events():
-        key = _event_key(ev)
-        cur.execute("SELECT gcal_id FROM events WHERE key=?", (key,))
-        row = cur.fetchone()
-        body = _event_body(ev)
+        try:
+            key = _event_key(ev)
+            cur.execute("SELECT gcal_id FROM events WHERE key=?", (key,))
+            row = cur.fetchone()
+            body = _event_body(ev)
+            
+            if body is None:
+                print(f"Skipping event due to invalid data: {ev.get('title', 'Unknown')}")
+                continue
 
-        if row:
-            # Update existing
-            service.events().update(calendarId=CAL_ID, eventId=row[0], body=body).execute()
-            updated += 1
-        else:
-            g_ev = service.events().insert(calendarId=CAL_ID, body=body).execute()
-            cur.execute("INSERT OR REPLACE INTO events(key, gcal_id) VALUES(?,?)", (key, g_ev["id"]))
-            inserted += 1
+            if row:
+                # Update existing
+                service.events().update(calendarId=CAL_ID, eventId=row[0], body=body).execute()
+                updated += 1
+                print(f"Updated event: {ev.get('title', 'Unknown')}")
+            else:
+                g_ev = service.events().insert(calendarId=CAL_ID, body=body).execute()
+                cur.execute("INSERT OR REPLACE INTO events(key, gcal_id) VALUES(?,?)", (key, g_ev["id"]))
+                inserted += 1
+                print(f"Inserted event: {ev.get('title', 'Unknown')}")
+        except Exception as e:
+            print(f"Error processing event {ev.get('title', 'Unknown')}: {e}")
+            continue
 
     conn.commit()
     conn.close()
