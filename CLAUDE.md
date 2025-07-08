@@ -51,8 +51,9 @@ Inserted X, updated Y events to Google Calendar.
 ```
 
 ### 重複排除効果
-- **削減率**: 約14%（77→66イベント）
+- **削減率**: 約13%（77→67イベント）
 - **統合例**: 複数ソースからの情報統合
+- **アルゴリズム**: 7つの異なる検出手法による包括的重複排除
 
 ## 🐛 トラブルシューティング
 
@@ -95,7 +96,7 @@ The specified time range is empty
 
 ### 成功指標
 1. **認証成功**: "Credentials created successfully"
-2. **イベント処理**: 66個前後のイベント処理
+2. **イベント処理**: 67個前後のイベント処理
 3. **重複排除**: "Sources: [複数サイト]"表示
 4. **Calendar同期**: "Inserted X, updated Y events"
 
