@@ -41,44 +41,118 @@ _DEF_YEAR = datetime.now().year
 
 
 def normalize_title(title: str) -> str:
-    """Normalize event title for duplicate detection."""
-    # Convert to lowercase and remove common variations
+    """Ultra-aggressive event title normalization for duplicate detection."""
+    # Convert to lowercase for processing
     normalized = title.lower()
     
-    # Remove common prefixes/suffixes
-    prefixes_suffixes = [
+    # Japanese-English festival name mappings (expanded)
+    ja_en_mappings = {
+        'tanabata': '七夕',
+        'matsuri': 'まつり',
+        'festival': 'まつり',
+        'hanabi': '花火',
+        'fireworks': '花火',
+        'owara': 'おわら',
+        'kaze': '風',
+        'bon': '盆',
+        'bon festival': '風の盆',
+        'toyama': '富山',
+        'takaoka': '高岡',
+        'toide': '戸出',
+        'uozu': '魚津',
+        'kurobe': '黒部',
+        'namerikawa': '滑川',
+        'imizu': '射水',
+        'himi': '氷見',
+        'nanto': '南砺',
+        'tonami': '砺波',
+        'market': 'マーケット',
+        'marche': 'マルシェ',
+        'asaichi': '朝市',
+        'pool': 'プール',
+        'open': 'オープン',
+        'summer': '夏',
+        'natsu': '夏',
+        'aki': '秋',
+        'fuyu': '冬',
+        'haru': '春'
+    }
+    
+    # Apply Japanese-English mappings
+    for en, ja in ja_en_mappings.items():
+        normalized = normalized.replace(en, ja)
+    
+    # Ultra-aggressive removal patterns
+    removal_patterns = [
+        # Numbers and years (more comprehensive)
         r'^第\d+回\s*', r'\s*第\d+回$',  # 第XX回
-        r'^令和\d+年\s*', r'\s*令和\d+年$',  # 令和X年
-        r'^平成\d+年\s*', r'\s*平成\d+年$',  # 平成X年
+        r'^令和\d+年?\s*', r'\s*令和\d+年?$',  # 令和X年
+        r'^平成\d+年?\s*', r'\s*平成\d+年?$',  # 平成X年  
         r'^20\d{2}年?\s*', r'\s*20\d{2}年?$',  # 20XX年
-        r'\s*～.*$', r'\s*-.*$',  # Remove everything after ～ or -
-        r'\s*\(.*\)$', r'^\(.*\)\s*',  # Remove parentheses
-        r'\s*【.*】$', r'^【.*】\s*',  # Remove 【】
-        r'\s*［.*］$', r'^［.*］\s*',  # Remove ［］
-        r'\s*〈.*〉$', r'^〈.*〉\s*',  # Remove 〈〉
+        r'^\d{4}年?\s*', r'\s*\d{4}年?$',  # YYYY年
+        r'^市制\d+周年記念\s*', r'\s*市制\d+周年記念$',  # 市制XX周年記念
+        
+        # Event details and descriptions (expanded)
+        r'\s*～.*$', r'\s*-.*$', r'\s*\–.*$', r'\s*—.*$',  # Remove everything after separators
+        r'\s*【[^】]*】.*$', r'^【[^】]*】\s*',  # Remove detailed descriptions
+        r'\s*［[^］]*］.*$', r'^［[^］]*］\s*',  # Remove brackets
+        r'\s*〈[^〉]*〉.*$', r'^〈[^〉]*〉\s*',  # Remove angle brackets
+        r'\s*\([^)]*\)$', r'^\([^)]*\)\s*',  # Remove parentheses content
+        r'\s*（[^）]*）$',  # Remove Japanese parentheses at end only
+        
+        # Location and venue specifics (moderate removal)
+        r'^（[^）]*）\s*',  # Remove city/location prefixes at start only
+        r'\s*会場.*$', r'\s*にて.*$', r'\s*で開催.*$',  # Remove venue info
+        r'\s*at\s+.*$', r'\s*in\s+.*$',  # Remove English venue info
+        
+        # Time and schedule details (expanded)
+        r'\s*\d{1,2}:\d{2}.*$',  # Remove time information
+        r'\s*午前\d+時.*$', r'\s*午後\d+時.*$',  # Remove Japanese time
+        r'\s*\d+月\d+日.*$',  # Remove specific dates from title
+        r'\s*開催期間.*$', r'\s*開催日.*$',  # Remove schedule info
+        
+        # Additional event details (expanded)
+        r'\s*予約.*$', r'\s*受付.*$', r'\s*販売.*$',  # Remove booking info
+        r'\s*with\s+.*$', r'\s*&\s+.*$',  # Remove collaboration details
+        r'\s*チケット.*$', r'\s*入場.*$',  # Remove ticket info
+        r'\s*他\s*\d+件.*$',  # Remove "other X events" info
+        r'\s*\d+件.*$',  # Remove count info
     ]
     
-    for pattern in prefixes_suffixes:
+    for pattern in removal_patterns:
         normalized = re.sub(pattern, '', normalized)
     
-    # Remove extra whitespace and punctuation
+    # Normalize punctuation and whitespace (more aggressive)
     normalized = re.sub(r'[　\s]+', ' ', normalized)  # Normalize whitespace
-    normalized = re.sub(r'[・·•]', '', normalized)  # Remove separators
-    normalized = re.sub(r'[！!？?。、，,]', '', normalized)  # Remove punctuation
+    normalized = re.sub(r'[・·•\-\–\—〜～]', '', normalized)  # Remove separators
+    normalized = re.sub(r'[！!？?。、，,：:；;]', '', normalized)  # Remove punctuation
+    normalized = re.sub(r'["\'"\'"]', '', normalized)  # Remove quotes
+    normalized = re.sub(r'[『』「」]', '', normalized)  # Remove Japanese quotes
     
-    # Remove location/venue information if it looks generic
-    location_patterns = [
-        r'\s*富山県?\s*', r'\s*高岡市?\s*', r'\s*魚津市?\s*',
-        r'\s*会場.*$', r'\s*にて.*$', r'\s*で開催.*$'
+    # Remove only administrative location indicators, not event-specific places
+    location_removal = [
+        r'\s*富山県\s*', r'\s*高岡市\s*', r'\s*魚津市\s*', r'\s*黒部市\s*',
+        r'\s*滑川市\s*', r'\s*射水市\s*', r'\s*氷見市\s*', r'\s*南砺市\s*',
+        r'\s*砺波市\s*', r'\s*小矢部市\s*', r'\s*上市町\s*', r'\s*立山町\s*',
+        r'\s*通り\s*', r'\s*商店街\s*',
+        # Keep place names that are part of event identity like '戸出', '八尾', etc.
     ]
-    for pattern in location_patterns:
+    
+    for pattern in location_removal:
         normalized = re.sub(pattern, '', normalized)
     
-    return normalized.strip()
+    # Final cleanup (more thorough)
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    
+    # Remove single character artifacts
+    if len(normalized) <= 1:
+        return normalized
+    
+    return normalized
 
 
 def events_similar(event1: dict, event2: dict) -> bool:
-    """Check if two events are likely duplicates."""
+    """Ultra-aggressive duplicate detection with multiple criteria."""
     # Normalize titles
     title1 = normalize_title(event1['title'])
     title2 = normalize_title(event2['title'])
@@ -90,27 +164,52 @@ def events_similar(event1: dict, event2: dict) -> bool:
     # Calculate title similarity
     similarity = SequenceMatcher(None, title1, title2).ratio()
     
-    # Check date proximity (same date or within 1 day)
+    # Check date proximity (same date or within 7 days for recurring events)
     date_diff = abs((event1['start'] - event2['start']).days)
-    date_similar = date_diff <= 1
+    date_similar = date_diff <= 7
     
     # Check if one title contains the other (subset matching)
     longer_title = title1 if len(title1) >= len(title2) else title2
     shorter_title = title2 if title1 == longer_title else title1
     contains_other = shorter_title in longer_title
     
+    # Additional ultra-aggressive checks
+    # Check if titles are very similar even after different normalization
+    title1_basic = event1['title'].lower().strip()
+    title2_basic = event2['title'].lower().strip()
+    basic_similarity = SequenceMatcher(None, title1_basic, title2_basic).ratio()
+    
+    # Check for common event patterns (朝市, まつり, etc.)
+    common_patterns = ['朝市', 'まつり', 'マーケット', 'マルシェ', 'プール', 'オープン', '花火大会']
+    has_common_pattern = any(pattern in title1 and pattern in title2 for pattern in common_patterns)
+    
+    # Ultra-aggressive: Check for exact title match even if from different sites
+    # (This catches cases like "戸出七夕まつり" vs "（高岡市）第60回 戸出七夕まつり")
+    raw_title1 = event1['title'].replace('（', '').replace('）', '').replace('第', '').replace('回', '')
+    raw_title2 = event2['title'].replace('（', '').replace('）', '').replace('第', '').replace('回', '')
+    raw_similarity = SequenceMatcher(None, raw_title1.lower(), raw_title2.lower()).ratio()
+    
     # Consider them duplicates if:
     # 1. Exact match after normalization
-    # 2. High title similarity (>0.8) and same/close dates
-    # 3. Very high title similarity (>0.85) regardless of date
+    # 2. High title similarity (>0.75) and same/close dates
+    # 3. Very high title similarity (>0.8) regardless of date
     # 4. One title contains the other and dates are similar
+    # 5. Basic similarity very high (>0.85) even without normalization
+    # 6. Common pattern + high similarity + date proximity
+    # 7. Raw similarity very high (>0.9) - catches prefixed versions
     if title1 == title2:
         return True
-    elif contains_other and date_similar and len(shorter_title) >= 3:
+    elif contains_other and date_similar and len(shorter_title) >= 2:
         return True
-    elif similarity > 0.85:
+    elif similarity > 0.8:
         return True  
-    elif similarity > 0.7 and date_similar:
+    elif similarity > 0.75 and date_similar:
+        return True
+    elif basic_similarity > 0.85 and date_similar:
+        return True
+    elif has_common_pattern and similarity > 0.6 and date_similar:
+        return True
+    elif raw_similarity > 0.9 and date_similar:
         return True
     
     return False
