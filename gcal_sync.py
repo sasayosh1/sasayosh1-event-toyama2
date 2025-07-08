@@ -125,8 +125,11 @@ def _event_body(ev: dict) -> dict:
             end_date = start_date + timedelta(days=1)
     
     # Validate dates
-    if end_date <= start_date:
+    if end_date is not None and end_date <= start_date:
         print(f"Invalid date range: start={start_date}, end={end_date}. Fixing...")
+        end_date = start_date + timedelta(days=1)
+    elif end_date is None:
+        # For single day events, set end date to next day for Google Calendar
         end_date = start_date + timedelta(days=1)
     
     print(f"Final dates - Start: {start_date}, End: {end_date}")
