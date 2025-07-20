@@ -62,7 +62,9 @@ jobs:
         run: |
           echo "🚀 Running Enhanced Event Processing & Sync"
           echo "Minimum quality score: ${{ github.event.inputs.min_quality || '60.0' }}"
-          python enhanced_gcal_sync.py --enhanced --min-quality ${{ github.event.inputs.min_quality || '60.0' }}
+          echo "⚠️  Enhanced sync temporarily disabled due to date processing issue"
+          echo "🔄 Falling back to legacy sync with URL improvements"
+          python gcal_sync.py
       
       - name: Run Legacy Sync (Fallback)
         if: ${{ github.event.inputs.sync_mode == 'legacy' }}
