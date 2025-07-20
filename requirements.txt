@@ -4,3 +4,15 @@ python-dateutil
 google-api-python-client
 google-auth-httplib2
 google-auth-oauthlib
+
+# Enhanced functionality dependencies
+fuzzywuzzy
+python-Levenshtein
+jaconv
+geocoder
+
+# Optional dependencies for better performance
+# Install with: pip install "package_name"
+# - fuzzywuzzy: Improved string similarity matching
+# - jaconv: Japanese character conversion
+# - geocoder: Location geocoding (requires API keys)

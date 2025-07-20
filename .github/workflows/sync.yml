@@ -1,29 +1,88 @@
-name: Sync Toyama Events
+name: Enhanced Toyama Events Sync
 
 on:
   schedule:
     # 毎日 07:00 JST（22:00 UTC）に実行
     - cron: '0 22 * * *'
   workflow_dispatch:
+    inputs:
+      sync_mode:
+        description: 'Sync mode to use'
+        required: false
+        default: 'enhanced'
+        type: choice
+        options:
+        - enhanced
+        - legacy
+      min_quality:
+        description: 'Minimum quality score for sync'
+        required: false
+        default: '60.0'
+        type: string
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install deps
+          cache: 'pip'
+      
+      - name: Install dependencies
         run: |
+          pip install --upgrade pip
           pip install -r requirements.txt --verbose
+      
       - name: Write token.json
         env:
           GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
-        run: echo "$GOOGLE_TOKEN_B64" | base64 -d > token.json
-      - name: Run sync
+        run: |
+          if [ -n "$GOOGLE_TOKEN_B64" ]; then
+            echo "$GOOGLE_TOKEN_B64" | base64 -d > token.json
+            echo "✅ Token file created successfully"
+          else
+            echo "❌ GOOGLE_TOKEN_B64 secret not found"
+            exit 1
+          fi
+      
+      - name: Run Enhanced Sync
+        if: ${{ github.event.inputs.sync_mode != 'legacy' }}
         env:
           GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
           GOOGLE_CREDENTIALS_B64: ${{ secrets.GOOGLE_CREDENTIALS_B64 }}
-        run: python gcal_sync.py
+        run: |
+          echo "🚀 Running Enhanced Event Processing & Sync"
+          echo "Minimum quality score: ${{ github.event.inputs.min_quality || '60.0' }}"
+          python enhanced_gcal_sync.py --enhanced --min-quality ${{ github.event.inputs.min_quality || '60.0' }}
+      
+      - name: Run Legacy Sync (Fallback)
+        if: ${{ github.event.inputs.sync_mode == 'legacy' }}
+        env:
+          GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
+          GOOGLE_CREDENTIALS_B64: ${{ secrets.GOOGLE_CREDENTIALS_B64 }}
+        run: |
+          echo "🔄 Running Legacy Sync (Fallback Mode)"
+          python gcal_sync.py
+      
+      - name: Generate Sync Report
+        if: ${{ always() }}
+        env:
+          GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
+          GOOGLE_CREDENTIALS_B64: ${{ secrets.GOOGLE_CREDENTIALS_B64 }}
+        run: |
+          echo "📊 Generating sync report..."
+          python enhanced_gcal_sync.py --report || echo "Report generation failed"
+      
+      - name: Upload artifacts on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-failure-logs
+          path: |
+            *.log
+            events.db
+          retention-days: 7

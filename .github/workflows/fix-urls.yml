@@ -1,0 +1,69 @@
+name: Fix Existing Event URLs
+
+on:
+  workflow_dispatch:
+    inputs:
+      days_back:
+        description: 'How many days back to look for events'
+        required: false
+        default: '90'
+        type: string
+      dry_run:
+        description: 'Dry run (no actual changes)'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  fix-urls:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt --verbose
+      
+      - name: Write token.json
+        env:
+          GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
+        run: |
+          if [ -n "$GOOGLE_TOKEN_B64" ]; then
+            echo "$GOOGLE_TOKEN_B64" | base64 -d > token.json
+            echo "✅ Token file created successfully"
+          else
+            echo "❌ GOOGLE_TOKEN_B64 secret not found"
+            exit 1
+          fi
+      
+      - name: Fix existing URLs
+        env:
+          GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
+          GOOGLE_CREDENTIALS_B64: ${{ secrets.GOOGLE_CREDENTIALS_B64 }}
+        run: |
+          echo "🔧 Fixing existing toyama-life.com URLs"
+          echo "Days back: ${{ github.event.inputs.days_back || '90' }}"
+          echo "Dry run: ${{ github.event.inputs.dry_run || 'true' }}"
+          
+          if [ "${{ github.event.inputs.dry_run || 'true' }}" = "true" ]; then
+            python fix_existing_urls.py --dry-run --days ${{ github.event.inputs.days_back || '90' }}
+          else
+            python fix_existing_urls.py --days ${{ github.event.inputs.days_back || '90' }}
+          fi
+      
+      - name: Upload results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: url-fix-results
+          path: |
+            *.log
+          retention-days: 7

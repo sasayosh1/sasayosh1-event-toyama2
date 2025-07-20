@@ -1,0 +1,57 @@
+name: Legacy Toyama Events Sync (Backup)
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_legacy:
+        description: 'Force legacy sync even if enhanced is available'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  legacy-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install basic dependencies
+        run: |
+          pip install requests beautifulsoup4 python-dateutil
+          pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib
+      
+      - name: Write token.json
+        env:
+          GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
+        run: |
+          if [ -n "$GOOGLE_TOKEN_B64" ]; then
+            echo "$GOOGLE_TOKEN_B64" | base64 -d > token.json
+            echo "✅ Legacy token file created successfully"
+          else
+            echo "❌ GOOGLE_TOKEN_B64 secret not found"
+            exit 1
+          fi
+      
+      - name: Run Legacy Sync
+        env:
+          GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
+          GOOGLE_CREDENTIALS_B64: ${{ secrets.GOOGLE_CREDENTIALS_B64 }}
+        run: |
+          echo "🔄 Running Legacy Sync System"
+          echo "Note: This is the original system without enhanced features"
+          python gcal_sync.py
+      
+      - name: Upload artifacts on failure
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacy-sync-failure-logs
+          path: |
+            *.log
+            events.db
+          retention-days: 3
