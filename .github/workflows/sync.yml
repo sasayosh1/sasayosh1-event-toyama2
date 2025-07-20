@@ -19,6 +19,11 @@ on:
         required: false
         default: '60.0'
         type: string
+      fix_existing_urls:
+        description: 'Fix existing event URLs (experimental)'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   sync:
@@ -67,6 +72,15 @@ jobs:
         run: |
           echo "🔄 Running Legacy Sync (Fallback Mode)"
           python gcal_sync.py
+      
+      - name: Fix Existing URLs (if requested)
+        if: ${{ github.event.inputs.fix_existing_urls == 'true' }}
+        env:
+          GOOGLE_TOKEN_B64: ${{ secrets.GOOGLE_TOKEN_B64 }}
+          GOOGLE_CREDENTIALS_B64: ${{ secrets.GOOGLE_CREDENTIALS_B64 }}
+        run: |
+          echo "🔧 Fixing existing toyama-life.com URLs..."
+          python fix_existing_urls.py --days 90 || echo "URL fixing failed (non-critical)"
       
       - name: Generate Sync Report
         if: ${{ always() }}
