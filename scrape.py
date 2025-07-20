@@ -558,12 +558,30 @@ def fetch_toyamalife() -> Iterable[dict]:
                     location = tds[1].get_text(" ", strip=True)
                 break
 
+        # Find event detail URL from any link in the table
+        event_url = url  # Default to main page
+        for tr in table.select("tr"):
+            # Look for links in all table cells
+            links = tr.find_all("a", href=True)
+            for link in links:
+                href = link.get("href")
+                link_text = link.get_text(strip=True)
+                # Skip if it's just the page anchor or if text is too generic
+                if (href and href.startswith("http") and 
+                    not href.startswith(url) and 
+                    link_text and len(link_text) > 3 and
+                    not re.search(r"^(こちら|詳細|more|→)$", link_text, re.I)):
+                    event_url = href
+                    break
+            if event_url != url:
+                break
+
         yield {
             "title": title,
             "start": start,
             "end": end,
             "location": location,
-            "url": url + "#" + re.sub(r"\s+", "-", title)[:30],
+            "url": event_url,
             "site": "toyama-life",
         }
 
